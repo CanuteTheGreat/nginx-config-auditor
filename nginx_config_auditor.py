@@ -17,6 +17,7 @@ if any HIGH-severity finding is present (useful in CI).
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,16 +38,78 @@ SECURITY_HEADERS = [
 
 
 def strip_comments(text):
+    """Remove '#' comments, honouring single/double quotes (a '#' inside a
+    quoted string is data, not a comment). Line structure is preserved."""
     out = []
-    for line in text.splitlines():
-        # crude but effective for nginx conf syntax: '#' starts a comment
-        # unless it's inside a quoted string (rare in nginx confs, good enough
-        # for a free static tool -- flag it in the README as a known limit).
-        idx = line.find('#')
-        if idx != -1:
-            line = line[:idx]
-        out.append(line)
-    return "\n".join(out)
+    quote = None
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\" and i + 1 < len(text):
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "\"'":
+            quote = c
+        elif c == "#":
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def statements(clean):
+    """Yield (line_no, statement) for every ';'-terminated directive, joining
+    directives that span several lines (e.g. a long ssl_ciphers list) and
+    dropping block openers/closers. Whitespace is collapsed to single spaces."""
+    buf = []
+    start_line = None
+    line = 1
+    quote = None
+    for c in clean:
+        if c == "\n":
+            line += 1
+        if quote:
+            buf.append(c)
+            if c == quote:
+                quote = None
+            continue
+        if c in "\"'":
+            quote = c
+        if c in "{}":
+            buf, start_line = [], None
+            continue
+        if c == ";":
+            stmt = " ".join("".join(buf).split())
+            if stmt:
+                yield start_line, stmt + ";"
+            buf, start_line = [], None
+            continue
+        if start_line is None and not c.isspace():
+            start_line = line
+        buf.append(c)
+
+
+def weak_cipher_hits(cipherspec):
+    """Weak tokens actually ENABLED by an OpenSSL cipher string. Excluded
+    entries ("!aNULL", "-MD5") are the fix, not the problem -- the stock
+    `HIGH:!aNULL:!MD5` must not be reported as weak."""
+    hits = []
+    for tok in cipherspec.strip("\"'").replace(",", ":").replace(" ", ":").split(":"):
+        if not tok or tok[0] in "!-" or tok.startswith("@"):
+            continue
+        tok = tok.lstrip("+")
+        parts = set(tok.split("-")) | {tok}
+        for weak in WEAK_CIPHER_TOKENS:
+            matched = weak in parts or (weak == "3DES" and "CBC3" in tok)
+            if matched and weak not in hits:
+                hits.append(weak)
+    return hits
 
 
 def find_files(path):
@@ -71,10 +134,9 @@ def audit_text(path, text):
             "line": line_no,
         })
 
-    lines = clean.splitlines()
+    http2_directive = re.search(r"(^|[;{}\s])http2\s+on\s*;", clean) is not None
 
-    for i, line in enumerate(lines, start=1):
-        l = line.strip()
+    for i, l in statements(clean):
 
         # server_tokens on (or missing -> handled globally below)
         m = re.match(r"server_tokens\s+(\S+)\s*;", l)
@@ -97,8 +159,7 @@ def audit_text(path, text):
         # ssl_ciphers weak tokens
         m = re.match(r"ssl_ciphers\s+(.+?)\s*;", l)
         if m:
-            cipherspec = m.group(1)
-            hits = [t for t in WEAK_CIPHER_TOKENS if t in cipherspec]
+            hits = weak_cipher_hits(m.group(1))
             if hits:
                 add("HIGH", "ssl_ciphers", f"weak cipher token(s) present in ssl_ciphers: {', '.join(hits)}", i)
 
@@ -113,7 +174,7 @@ def audit_text(path, text):
             add("INFO", "proxy_pass_plaintext", "proxy_pass targets plain http:// backend (fine if backend is same-host/internal, verify network path)", i)
 
         # listen ... ssl missing http2/modern (informational only)
-        if re.match(r"listen\s+.*\bssl\b", l) and "http2" not in l:
+        if re.match(r"listen\s+.*\bssl\b", l) and "http2" not in l and not http2_directive:
             add("INFO", "listen_no_http2", "listen ... ssl without http2 -- consider enabling HTTP/2 for perf (not a security issue)", i)
 
         # root/alias pointing at overly broad paths
@@ -126,7 +187,7 @@ def audit_text(path, text):
             add("LOW", "custom_server_header", "manually setting Server header -- double-check it's not leaking version info", i)
 
         # SSI / autoindex format exposing directory
-        if "ssi on" in l.lower():
+        if re.match(r"ssi\s+on\s*;", l, re.I):
             add("INFO", "ssi_enabled", "SSI (Server Side Includes) enabled -- only a risk if untrusted users can upload content served by this block", i)
 
         # basic auth file check (presence, not content -- can't verify strength safely/statically)
@@ -134,17 +195,17 @@ def audit_text(path, text):
             add("INFO", "auth_basic_present", "auth_basic_user_file configured -- verify the htpasswd file uses bcrypt, not crypt/MD5", i)
 
     # Global (whole-file) checks
-    if "ssl_protocols" not in clean:
+    if not re.search(r"\bssl_protocols\s", clean):
         add("INFO", "ssl_protocols_unset", "no explicit ssl_protocols directive found in this file (may be set elsewhere / using nginx defaults)")
 
-    if "server_tokens" not in clean:
+    if not re.search(r"\bserver_tokens\s", clean):
         add("LOW", "server_tokens_default", "server_tokens not set explicitly -- nginx defaults to 'on' (version disclosure) unless set elsewhere")
 
     for header in SECURITY_HEADERS:
-        if header.lower() not in clean.lower():
+        if not re.search(r"\badd_header\s+[\"']?" + re.escape(header) + r"[\"']?\s", clean, re.I):
             add("MEDIUM", "missing_header", f"no add_header for {header} found in this file (may be set in an included file -- re-check merged config)")
 
-    if re.search(r"ssl_certificate\s+\S+;", clean) and "ssl_dhparam" not in clean:
+    if re.search(r"\bssl_certificate\s+\S+\s*;", clean) and not re.search(r"\bssl_dhparam\s", clean):
         add("LOW", "no_dhparam", "ssl_certificate present but no ssl_dhparam directive -- relying on nginx/OpenSSL default DH params")
 
     return findings
@@ -157,8 +218,9 @@ def docker_extract(container):
             ["docker", "cp", f"{container}:/etc/nginx", tmpdir + "/nginx"],
             check=True, capture_output=True, text=True,
         )
-    except subprocess.CalledProcessError as e:
-        print(f"docker cp failed: {e.stderr}", file=sys.stderr)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        print(f"docker cp failed: {getattr(e, 'stderr', None) or e}", file=sys.stderr)
         sys.exit(2)
     return tmpdir + "/nginx"
 
@@ -171,8 +233,10 @@ def main():
     ap.add_argument("--min-severity", default="INFO", choices=list(SEVERITY_ORDER), help="only show findings at or above this severity")
     args = ap.parse_args()
 
+    tmp_root = None
     if args.docker:
         scan_path = docker_extract(args.docker)
+        tmp_root = os.path.dirname(scan_path)
     elif args.path:
         scan_path = args.path
     else:
@@ -189,6 +253,20 @@ def main():
         sys.exit(2)
 
     all_findings = []
+    try:
+        all_findings = scan(files)
+    finally:
+        if tmp_root:
+            shutil.rmtree(tmp_root, ignore_errors=True)
+    if tmp_root:
+        prefix = os.path.join(tmp_root, "nginx")
+        for f in all_findings:
+            f["file"] = f"{args.docker}:/etc/nginx" + f["file"][len(prefix):]
+    report(args, files, all_findings)
+
+
+def scan(files):
+    all_findings = []
     for f in files:
         try:
             with open(f, "r", errors="replace") as fh:
@@ -197,7 +275,10 @@ def main():
             print(f"skip {f}: {e}", file=sys.stderr)
             continue
         all_findings.extend(audit_text(f, text))
+    return all_findings
 
+
+def report(args, files, all_findings):
     min_sev = SEVERITY_ORDER[args.min_severity]
     shown = [f for f in all_findings if SEVERITY_ORDER[f["severity"]] <= min_sev]
     shown.sort(key=lambda f: (SEVERITY_ORDER[f["severity"]], f["file"], f["line"] or 0))

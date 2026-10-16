@@ -36,9 +36,9 @@ Exit code is `1` if any HIGH-severity finding exists (useful in CI), `0` otherwi
   is set in a different `include`d file than the one you point it at, you'll
   get a false "missing" finding — always re-check with `nginx -T` for the
   fully merged config if you want to be sure.
-- Comment-stripping is a simple `#`-to-end-of-line strip; it does not handle
-  `#` inside quoted strings (nginx configs rarely need this, but it's a real
-  limitation).
+- Directives spanning several lines (e.g. a long `ssl_ciphers` list) and `#`
+  inside quoted strings are handled; cipher entries excluded with `!`/`-`
+  (like nginx's stock `HIGH:!aNULL:!MD5`) are not reported as weak.
 - It flags patterns, it does not prove exploitability — every HIGH/MEDIUM
   finding is worth a human look, not an automatic "fix this now."
 
@@ -78,3 +78,8 @@ https://buy.stripe.com/bJe7sLgKBgPZ1j1g8g1VK06
 ## License
 
 MIT
+
+## Tests
+
+`tests/` exercises every option and check end-to-end (fixtures validated by real `nginx -t`, plus `--docker` against a real nginx container) in Forgejo CI on
+Python 3.8 and current Python; `sh ci/run-tests.sh 3.13` reproduces it locally (needs docker).
