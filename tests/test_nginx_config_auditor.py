@@ -48,9 +48,8 @@ server {
     ssl_certificate     %(cert)s;
     ssl_certificate_key %(key)s;
     ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
-    ssl_ciphers HIGH:
-                RC4-SHA:
-                !aNULL;
+    ssl_ciphers
+        HIGH:RC4-SHA:!aNULL;
     ssl_prefer_server_ciphers off;
     add_header Server "nginx-custom";
     location / { root /; }
@@ -134,7 +133,7 @@ class TestChecks(Base):
         self.assertIn("RC4", by_rule["ssl_ciphers"][0]["message"])
         self.assertNotIn("aNULL", by_rule["ssl_ciphers"][0]["message"])  # excluded with '!'
         self.assertEqual(by_rule["ssl_ciphers"][0]["line"], 9)            # multi-line directive start
-        self.assertEqual(by_rule["autoindex"][0]["line"], 15)
+        self.assertEqual(by_rule["autoindex"][0]["line"], 14)
 
     def test_unset_defaults_reported(self):
         _, f = self.findings(self.conf("server { listen 8080; location / { return 204; } }\n"))
