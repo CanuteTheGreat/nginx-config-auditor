@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nginx-config-auditor"
+dynamic = ["version"]
+description = "Static analyzer for nginx configs (follows includes or nginx -T) flagging common misconfigurations"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.8"
+authors = [{ name = "Errant Solutions", email = "hello@errant.solutions" }]
+keywords = ["nginx", "config", "static-analysis", "security"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://errant.solutions/tools/nginx-config-auditor.html"
+Source = "https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor"
+Changelog = "https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor/src/branch/master/CHANGELOG.md"
+Releases = "https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor/releases"
+
+[project.scripts]
+nginx-config-auditor = "nginx_config_auditor:main"
+
+[tool.hatch.version]
+path = "nginx_config_auditor.py"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["nginx_config_auditor.py"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["nginx_config_auditor.py", "README.md", "LICENSE", "CHANGELOG.md", "tests"]

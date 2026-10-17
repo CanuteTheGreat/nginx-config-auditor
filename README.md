@@ -1,79 +1,70 @@
 # nginx-config-auditor
 
-A small, free, stdlib-only Python 3 static analyzer for nginx configuration
-files. No network calls, no dependencies, read-only. Point it at a config
-file, a directory of `.conf` files, or a running Docker container and it
-flags common misconfigurations:
+A small, free, stdlib-only Python 3 static analyzer for nginx configuration.
+No network calls, no dependencies, read-only. It parses the config the way
+nginx does (blocks, quoting, `include` with globs) and audits the **merged
+tree**, so a header or TLS setting that lives in an included snippet counts
+for every server that includes it. Point it at `nginx.conf`, a directory, a
+saved `nginx -T` dump, this host's nginx, or a running Docker container.
 
-- `autoindex on` (directory listing exposure) — HIGH
-- weak TLS protocols (SSLv2/3, TLSv1, TLSv1.1) in `ssl_protocols` — HIGH
-- weak cipher tokens (RC4, DES, 3DES, MD5, EXPORT, NULL, ADH, PSK) in `ssl_ciphers` — HIGH
-- `root` / `alias` pointing at `/` — MEDIUM
-- missing common security headers (HSTS, X-Content-Type-Options,
-  X-Frame-Options, CSP, Referrer-Policy) — MEDIUM
-- `server_tokens` left on/default (version disclosure) — LOW
-- `ssl_prefer_server_ciphers off` — LOW
-- missing `ssl_dhparam` — LOW
-- informational notes: plaintext `proxy_pass` backends, SSI enabled,
-  `auth_basic_user_file` presence, HTTP/2 not enabled on SSL listeners
+| Finding | Severity |
+|---|---|
+| `autoindex on` (directory listing) | HIGH |
+| weak TLS protocols (SSLv2/3, TLSv1, TLSv1.1) in `ssl_protocols` | HIGH |
+| weak cipher tokens (RC4, DES, 3DES, MD5, EXPORT, NULL, ADH, PSK) enabled in `ssl_ciphers` | HIGH |
+| **alias traversal**: `location /static` (no trailing slash) with `alias /srv/static/` | HIGH |
+| missing security headers per server (HSTS on TLS servers, X-Content-Type-Options, X-Frame-Options, CSP, Referrer-Policy), with http-level headers inherited exactly as nginx inherits them | MEDIUM |
+| **`add_header` redefinition**: a location with its own `add_header` silently drops every inherited header | MEDIUM |
+| `valid_referers none`, `proxy_set_header Host $http_host` (Host spoofing), `$uri`/`$document_uri` in response headers or redirects (header splitting), unanchored `$http_origin`/`$http_referer` regexes | MEDIUM |
+| `root` / `alias` pointing at `/` | MEDIUM |
+| security header without `always` (not sent on 4xx/5xx), HSTS max-age under 180 days, multi-line header values | LOW |
+| `server_tokens` on/unset, `ssl_prefer_server_ciphers off`, missing `ssl_dhparam`, custom `Server` header | LOW |
+| plaintext `proxy_pass`, SSI, `auth_basic_user_file`, no HTTP/2, includes that match nothing, `.conf` files nginx.conf never includes | INFO |
+
+The header-inheritance, alias, referer, Host, header-splitting and origin checks are the
+same classes of problems [gixy](https://github.com/yandex/gixy) looks for.
+
+## Install
+
+```sh
+pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git        # latest release branch; puts `nginx-config-auditor` on PATH
+pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git@v1.2.0  # a pinned release
+brew install canutethegreat/errant-tools/nginx-config-auditor   # after: brew tap canutethegreat/errant-tools https://git.canutethegreat.com/CanuteTheGreat/homebrew-errant-tools
+scoop install errant-tools/nginx-config-auditor                 # after: scoop bucket add errant-tools https://git.canutethegreat.com/CanuteTheGreat/scoop-errant-tools
+```
+
+Or download the single file (stdlib-only Python 3.8+) and run it directly:
+`curl -fsSLO https://errant.solutions/downloads/nginx_config_auditor.py && python3 nginx_config_auditor.py --help`.
+Every [release](https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor/releases) has a changelog, the wheel, the sdist and a `SHA256SUMS` file.
+Not on PyPI yet, so plain `pipx install nginx-config-auditor` doesn't work until it's published there.
 
 ## Usage
 
 ```
-python3 nginx_config_auditor.py /etc/nginx/nginx.conf
-python3 nginx_config_auditor.py /etc/nginx/                 # recursive *.conf scan
-python3 nginx_config_auditor.py --docker my-nginx-container # docker cp's /etc/nginx out and scans it
-python3 nginx_config_auditor.py /etc/nginx/ --json          # machine-readable output
-python3 nginx_config_auditor.py /etc/nginx/ --min-severity HIGH  # only show HIGH findings
+nginx-config-auditor /etc/nginx/nginx.conf          # follows every include
+nginx-config-auditor /etc/nginx/                    # nginx.conf there if present, else each *.conf on its own
+sudo nginx-config-auditor --local                   # runs `nginx -T` and audits exactly what nginx loaded
+nginx -T | nginx-config-auditor --dump -            # or a saved dump file
+nginx-config-auditor --docker my-nginx-container    # `nginx -T` inside it (docker cp of /etc/nginx as fallback)
+nginx-config-auditor /etc/nginx/ --json --min-severity MEDIUM
+nginx-config-auditor /etc/nginx/ --fail-on medium   # CI gate
 ```
 
-Exit code is `1` if any HIGH-severity finding exists (useful in CI), `0` otherwise.
+Exit codes (same convention as every Errant Solutions tool):
 
-## Known limitations (be honest about these)
+| Code | Meaning |
+|---|---|
+| 0 | no finding at or above `--fail-on` (default `high`) |
+| 1 | at least one |
+| 2 | nothing to scan, a parse error, `nginx -T`/docker failed, or bad usage |
 
-- This is a **static** analyzer of individual config files, not a live
-  merged-config walker. If a directive (e.g. security headers, ssl_protocols)
-  is set in a different `include`d file than the one you point it at, you'll
-  get a false "missing" finding — always re-check with `nginx -T` for the
-  fully merged config if you want to be sure.
-- Directives spanning several lines (e.g. a long `ssl_ciphers` list) and `#`
-  inside quoted strings are handled; cipher entries excluded with `!`/`-`
-  (like nginx's stock `HIGH:!aNULL:!MD5`) are not reported as weak.
-- It flags patterns, it does not prove exploitability — every HIGH/MEDIUM
-  finding is worth a human look, not an automatic "fix this now."
+## Limitations
 
-## Real example run
-
-Run against the production `errant-solutions` nginx container (this site,
-errant.solutions, TLS-terminated upstream by a reverse proxy so ssl_* config
-lives elsewhere — correctly reported as INFO, not a false HIGH):
-
-```
-$ python3 nginx_config_auditor.py --docker errant-solutions
-nginx-config-auditor: scanned 3 file(s), 21 finding(s)
-
-[MEDIUM] missing_header           .../conf.d/default.conf
-         no add_header for Strict-Transport-Security found in this file (...)
-[MEDIUM] missing_header           .../conf.d/default.conf
-         no add_header for X-Content-Type-Options found in this file (...)
-... (5 missing-header findings x 3 files = 15)
-[LOW   ] server_tokens_default    .../conf.d/default.conf
-         server_tokens not set explicitly -- nginx defaults to 'on' (...)
-... (3 files)
-[INFO  ] ssl_protocols_unset      .../conf.d/default.conf
-         no explicit ssl_protocols directive found in this file (...)
-... (3 files)
-```
-
-Unedited real output. Took action on it: added the 5 missing security
-headers to this very site's nginx config as part of shipping this tool
-(see errant.solutions blog post for the diff).
-
-## Pay what you want
-
-Free to use, no license restrictions (MIT). If it saved you time, a
-pay-what-you-want tip is appreciated but never required:
-https://buy.stripe.com/bJe7sLgKBgPZ1j1g8g1VK06
+- It flags patterns, it does not prove exploitability: every HIGH/MEDIUM finding is worth a
+  human look.
+- Relative `include` paths are resolved against the directory of the file you point it at
+  (nginx uses its configured prefix); `--local`/`--dump` avoid the question entirely.
+- `*_by_lua_block` bodies are skipped, not parsed.
 
 ## License
 

@@ -212,6 +212,9 @@ class TestDocker(Base):
         f = json.loads(p.stdout)
         auto = [x for x in f if x["rule"] == "autoindex"]
         self.assertEqual(auto[0]["file"], f"{self.name}:/etc/nginx/conf.d/weak.conf")
+        # read through `nginx -T` inside the container: the merged config, includes and all
+        self.assertTrue(any(x["rule"] == "missing_header" and x["file"] == f"{self.name}:/etc/nginx/conf.d/weak.conf"
+                            for x in f), f)
         self.assertIn(f"{self.name}:/etc/nginx/nginx.conf", {x["file"] for x in f})
         after = set(glob.glob(os.path.join(tempfile.gettempdir(), "nginx-audit-*")))
         self.assertEqual(after, before, "temporary copy of the container config was left behind")
@@ -219,7 +222,156 @@ class TestDocker(Base):
     def test_docker_missing_container(self):
         p = run("--docker", self.name + "-nope")
         self.assertEqual(p.returncode, 2)
-        self.assertIn("docker cp failed", p.stderr)
+        self.assertIn("No such container", p.stderr)
+
+
+MAIN = """pid %(dir)s/nginx.pid;
+error_log stderr;
+events {}
+http {
+    access_log off;
+    server_tokens off;
+    ssl_protocols TLSv1.2 TLSv1.3;
+%(http)s
+}
+"""
+
+
+class TestMergedConfig(Base):
+    """Whole configs with includes, validated by `nginx -t -c` and audited as nginx sees them."""
+
+    def main(self, http, files=(), name="nginx.conf"):
+        for rel, body in files:
+            path = os.path.join(self.dir, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(body % PARAMS if "%(" in body else body)
+        main = os.path.join(self.dir, name)
+        with open(main, "w") as f:
+            f.write(MAIN % {"dir": self.dir, "http": http % dict(PARAMS, dir=self.dir)})
+        p = subprocess.run([NGINX, "-t", "-c", main], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, "rejected by real nginx: " + p.stderr)
+        return main
+
+    HEADERS = ('add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;\n'
+               'add_header X-Content-Type-Options nosniff always;\nadd_header X-Frame-Options DENY always;\n'
+               'add_header Content-Security-Policy "default-src \'self\'" always;\n'
+               'add_header Referrer-Policy no-referrer always;\n')
+    SERVER = ("server { listen 8443 ssl http2; server_name m.test; ssl_certificate %(cert)s; "
+              "ssl_certificate_key %(key)s; ssl_dhparam %(dh)s; %(inner)s }")
+
+    def server(self, inner):
+        return self.SERVER % dict(PARAMS, inner=inner)
+
+    def test_headers_from_an_include_count(self):
+        main = self.main("    " + self.server("include %(dir)s/snippets/headers.inc; location / { return 204; }"),
+                         [("snippets/headers.inc", self.HEADERS)])
+        code, f = self.findings(main)
+        self.assertEqual(code, 0)
+        self.assertEqual(f, [], f)
+        # the old one-file-at-a-time scan reported every header missing here
+        p = run("--json", os.path.join(self.dir, "snippets", "headers.inc"))
+        self.assertEqual([x["rule"] for x in json.loads(p.stdout) if x["rule"] == "missing_header"], [])
+
+    def test_http_level_headers_are_inherited_and_glob_includes(self):
+        main = self.main("    include %(dir)s/conf.d/*.conf;\n" + self.HEADERS.replace("\n", "\n    "),
+                         [("conf.d/a.conf", self.server("location / { return 204; }")),
+                          ("conf.d/b.conf", self.server("location / { return 204; }").replace("m.test", "n.test")
+                           .replace("8443", "8444"))])
+        p = run("--json", main)
+        f = json.loads(p.stdout)
+        self.assertEqual([x for x in f if x["rule"] == "missing_header"], [])
+        self.assertEqual(p.returncode, 0)
+        p = run(main)
+        self.assertIn("scanned 3 file(s)", p.stdout)
+
+    def test_add_header_in_location_drops_inherited(self):
+        main = self.main("    " + self.server(self.HEADERS + "location / { return 204; } "
+                                              "location /api/ { add_header Cache-Control no-store; return 204; } "
+                                              "location /ok/ { add_header Cache-Control no-store; "
+                                              + self.HEADERS + " return 204; }"))
+        _, f = self.findings(main)
+        redef = [x for x in f if x["rule"] == "add_header_redefinition"]
+        self.assertEqual(len(redef), 1, f)
+        self.assertIn("location /api/ in server m.test", redef[0]["message"])
+        self.assertIn("drops the inherited Strict-Transport-Security, X-Content-Type-Options", redef[0]["message"])
+        self.assertEqual(self.findings("--fail-on", "medium", main)[0], 1)
+        self.assertEqual(self.findings(main)[0], 0)
+
+    def test_gixy_style_checks(self):
+        main = self.main("    " + self.server(
+            self.HEADERS.replace(" always;\nadd_header X-Frame", ";\nadd_header X-Frame") +
+            "location /static { alias /srv/static/; } "
+            "location /assets/ { alias /srv/assets/; } "
+            "location /img/ { valid_referers none blocked m.test; if ($invalid_referer) { return 403; } } "
+            "location /p/ { proxy_set_header Host $http_host; proxy_pass http://127.0.0.1:9; } "
+            "location /h/ { proxy_set_header X-Orig $document_uri; proxy_pass http://127.0.0.1:9; } "
+            "location /r/ { return 302 https://$host$uri; } "
+            'location /o/ { if ($http_origin ~* "https://good.example") { return 204; } } '
+            'location /o2/ { if ($http_origin ~* "^https://good\\.example$") { return 204; } } '
+            'location /m/ { add_header X-Multi "a\n b"; return 204; }'))
+        _, f = self.findings(main)
+        by = {}
+        for x in f:
+            by.setdefault(x["rule"], []).append(x)
+        self.assertEqual(len(by["alias_traversal"]), 1)
+        self.assertEqual(by["alias_traversal"][0]["severity"], "HIGH")
+        self.assertIn("location /static (no trailing slash)", by["alias_traversal"][0]["message"])
+        self.assertEqual(len(by["valid_referers_none"]), 1)
+        self.assertEqual(len(by["host_spoofing"]), 1)
+        self.assertEqual(len(by["header_splitting"]), 2)
+        self.assertEqual(len(by["origin_regex"]), 1)       # the anchored, escaped one is fine
+        self.assertEqual(len(by["multiline_header"]), 1)
+        self.assertEqual([x["message"].split(" without")[0] for x in by["header_not_always"]],
+                         ["add_header Strict-Transport-Security"])
+        self.assertEqual(self.findings(main)[0], 1)  # alias traversal is HIGH
+
+    def test_directory_with_nginx_conf_follows_it(self):
+        self.main("    include %(dir)s/sites-enabled/*;",
+                  [("sites-enabled/site", self.server(self.HEADERS + "location / { return 204; }"))])
+        with open(os.path.join(self.dir, "sites-available.conf"), "w") as f:
+            f.write("server { listen 9; autoindex on; }\n")
+        code, f = self.findings(self.dir)
+        self.assertEqual(code, 0, f)  # the unused file's autoindex isn't active
+        self.assertEqual([x["rule"] for x in f if x["file"].endswith("sites-available.conf")], ["not_included"])
+
+    def test_dump_matches_path_mode(self):
+        main = self.main("    " + self.server("include %(dir)s/h.inc; location /static { alias /srv/s/; }"),
+                         [("h.inc", self.HEADERS)])
+        dump = subprocess.run([NGINX, "-T", "-c", main], capture_output=True, text=True, check=True).stdout
+        path = os.path.join(self.dir, "dump.txt")
+        with open(path, "w") as f:
+            f.write(dump)
+        a = self.findings(main)[1]
+        b = self.findings("--dump", path)[1]
+        p = subprocess.run([sys.executable, TOOL, "--json", "--dump", "-"], input=dump, capture_output=True, text=True)
+        self.assertEqual(sorted(map(json.dumps, a)), sorted(map(json.dumps, b)))
+        self.assertEqual(sorted(map(json.dumps, a)), sorted(map(json.dumps, json.loads(p.stdout))))
+        self.assertEqual(run("--dump", self.cfg_bad()).returncode, 2)
+
+    def cfg_bad(self):
+        path = os.path.join(self.dir, "notadump.txt")
+        with open(path, "w") as f:
+            f.write("hello\n")
+        return path
+
+    def test_local_nginx_T(self):
+        if os.geteuid() != 0:
+            self.fail("--local needs root to read the host's nginx config")
+        code, f = self.findings("--local")
+        self.assertTrue(any(x["file"] == "/etc/nginx/nginx.conf" for x in f), f)
+
+    def test_parse_errors_exit_2(self):
+        path = os.path.join(self.dir, "broken.conf")
+        with open(path, "w") as f:
+            f.write("server { listen 80;\n")
+        p = run(path)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("parse error", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
+    def test_version(self):
+        self.assertRegex(run("--version").stdout, r"^nginx-config-auditor \d+\.\d+\.\d+$")
 
 
 if __name__ == "__main__":
