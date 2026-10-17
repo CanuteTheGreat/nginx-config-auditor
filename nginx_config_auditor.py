@@ -25,7 +25,7 @@ No dependencies beyond the Python 3 standard library. Read-only: never
 modifies any file it scans. Exit codes: 0 = no finding at or above
 --fail-on (default: high), 1 = at least one, 2 = nothing to scan / usage error.
 """
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 import argparse
 import fnmatch

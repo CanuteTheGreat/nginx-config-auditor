@@ -2,7 +2,7 @@
 
 All notable changes. Versions are git tags; each tag has a Forgejo release with checksums.
 
-## Unreleased
+## 1.2.1 - 2026-10-17
 
 - `ssl_ciphers`: anonymous (unauthenticated) suites that aliases such as `HIGH`, `ALL`, `AES` or `kEDH`
   enable are reported when the string also sets `@SECLEVEL=0` (the only way current OpenSSL negotiates

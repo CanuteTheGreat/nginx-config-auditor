@@ -28,7 +28,7 @@ same classes of problems [gixy](https://github.com/yandex/gixy) looks for.
 
 ```sh
 pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git        # latest release branch; puts `nginx-config-auditor` on PATH
-pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git@v1.2.0  # a pinned release
+pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git@v1.2.1  # a pinned release
 brew install canutethegreat/errant-tools/nginx-config-auditor   # after: brew tap canutethegreat/errant-tools https://git.canutethegreat.com/CanuteTheGreat/homebrew-errant-tools
 scoop install errant-tools/nginx-config-auditor                 # after: scoop bucket add errant-tools https://git.canutethegreat.com/CanuteTheGreat/scoop-errant-tools
 ```
