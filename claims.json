@@ -1,0 +1,261 @@
+{
+ "offline": true,
+ "optional_imports": [],
+ "hidden_options": [],
+ "claims": [
+  {
+   "id": "merged-tree",
+   "text": "audits the **merged\ntree**",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_headers_from_an_include_count",
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_http_level_headers_are_inherited_and_glob_includes",
+    "tests/test_accuracy.py::TestHeaderInheritanceAgainstNginx::test_missing_headers_match_what_nginx_sends"
+   ]
+  },
+  {
+   "id": "autoindex",
+   "text": "`autoindex on` (directory listing)",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestChecks::test_weak_config_reports_every_rule",
+    "tests/test_nginx_config_auditor.py::TestChecks::test_hash_inside_quotes_is_not_a_comment",
+    "tests/test_nginx_config_auditor.py::TestChecks::test_commented_out_directives_ignored"
+   ]
+  },
+  {
+   "id": "protocols",
+   "text": "weak TLS protocols (SSLv2/3, TLSv1, TLSv1.1) in `ssl_protocols`",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestChecks::test_weak_config_reports_every_rule",
+    "tests/test_accuracy.py::TestMozillaGenerator::test_old_reports_its_legacy_protocols_and_3des",
+    "tests/test_accuracy.py::TestMozillaGenerator::test_modern_and_intermediate_have_no_high_tls_finding"
+   ]
+  },
+  {
+   "id": "ciphers",
+   "text": "weak cipher tokens (RC4, DES, 3DES, MD5, EXPORT, LOW, NULL, ADH/AECDH, PSK) enabled in `ssl_ciphers`",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestChecks::test_weak_config_reports_every_rule",
+    "tests/test_nginx_config_auditor.py::TestChecks::test_stock_cipher_string_not_flagged",
+    "tests/test_nginx_config_auditor.py::TestLimitationsAndSmallRules::test_anonymous_suites_need_seclevel_0",
+    "tests/test_accuracy.py::TestAnonymousCiphersAgainstHandshake::test_tool_reports_exactly_the_configs_that_negotiate_anonymous_suites",
+    "tests/test_accuracy.py::TestMozillaGenerator::test_old_reports_its_legacy_protocols_and_3des"
+   ]
+  },
+  {
+   "id": "alias-traversal",
+   "text": "**alias traversal**",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_gixy_style_checks"
+   ]
+  },
+  {
+   "id": "missing-headers",
+   "text": "missing security headers per server",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestChecks::test_weak_config_reports_every_rule",
+    "tests/test_nginx_config_auditor.py::TestChecks::test_header_named_elsewhere_is_still_missing",
+    "tests/test_accuracy.py::TestHeaderInheritanceAgainstNginx::test_missing_headers_match_what_nginx_sends",
+    "tests/test_accuracy.py::TestHeaderInheritanceAgainstNginx::test_corpus_exercises_every_case"
+   ]
+  },
+  {
+   "id": "redefinition",
+   "text": "**`add_header` redefinition**",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_add_header_in_location_drops_inherited",
+    "tests/test_accuracy.py::TestHeaderInheritanceAgainstNginx::test_location_redefinitions_match_dropped_headers"
+   ]
+  },
+  {
+   "id": "gixy",
+   "text": "`valid_referers none`, `proxy_set_header Host $http_host` (Host spoofing)",
+   "also": [
+    "same classes of problems [gixy](https://github.com/yandex/gixy) looks for"
+   ],
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_gixy_style_checks"
+   ]
+  },
+  {
+   "id": "root-slash",
+   "text": "`root` / `alias` pointing at `/`",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestChecks::test_weak_config_reports_every_rule"
+   ]
+  },
+  {
+   "id": "always-hsts-multiline",
+   "text": "security header without `always` (not sent on 4xx/5xx)",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_gixy_style_checks",
+    "tests/test_nginx_config_auditor.py::TestLimitationsAndSmallRules::test_short_hsts_max_age_is_low",
+    "tests/test_accuracy.py::TestHeaderInheritanceAgainstNginx::test_headers_without_always_match_404_behaviour"
+   ]
+  },
+  {
+   "id": "low-tls",
+   "text": "`server_tokens` on/unset, `ssl_prefer_server_ciphers off`, missing `ssl_dhparam`",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestChecks::test_weak_config_reports_every_rule",
+    "tests/test_nginx_config_auditor.py::TestChecks::test_unset_defaults_reported"
+   ]
+  },
+  {
+   "id": "info",
+   "text": "plaintext `proxy_pass`, SSI, `auth_basic_user_file`, no HTTP/2",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestChecks::test_weak_config_reports_every_rule",
+    "tests/test_nginx_config_auditor.py::TestChecks::test_http2_on_directive_counts_as_http2",
+    "tests/test_nginx_config_auditor.py::TestCli::test_directory_scan_min_severity_and_text",
+    "tests/test_nginx_config_auditor.py::TestLimitationsAndSmallRules::test_relative_include_resolves_against_the_files_directory"
+   ]
+  },
+  {
+   "id": "limit-patterns",
+   "text": "It flags patterns, it does not prove exploitability",
+   "tests": [
+    "tests/test_accuracy.py::TestHeaderInheritanceAgainstNginx::test_missing_headers_match_what_nginx_sends",
+    "tests/test_accuracy.py::TestAnonymousCiphersAgainstHandshake::test_tool_reports_exactly_the_configs_that_negotiate_anonymous_suites"
+   ]
+  },
+  {
+   "id": "limit-relative-includes",
+   "text": "Relative `include` paths are resolved against the directory of the file you point it at",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestLimitationsAndSmallRules::test_relative_include_resolves_against_the_files_directory"
+   ]
+  },
+  {
+   "id": "limit-lua",
+   "text": "`*_by_lua_block` bodies are skipped, not parsed",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestLimitationsAndSmallRules::test_lua_block_bodies_are_skipped_not_parsed"
+   ]
+  },
+  {
+   "id": "directory",
+   "text": "nginx.conf there if present, else each *.conf on its own",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_directory_with_nginx_conf_follows_it",
+    "tests/test_nginx_config_auditor.py::TestCli::test_directory_scan_min_severity_and_text"
+   ]
+  },
+  {
+   "id": "local",
+   "text": "runs `nginx -T` and audits exactly what nginx loaded",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_local_nginx_T"
+   ],
+   "flags": [
+    "--local"
+   ]
+  },
+  {
+   "id": "dump",
+   "text": "nginx -T | nginx-config-auditor --dump -",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_dump_matches_path_mode",
+    "tests/test_accuracy.py::TestHeaderInheritanceAgainstNginx::test_nginx_T_dump_gives_identical_findings"
+   ],
+   "flags": [
+    "--dump"
+   ]
+  },
+  {
+   "id": "docker",
+   "text": "nginx-config-auditor --docker my-nginx-container",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestDocker::test_docker_mode",
+    "tests/test_nginx_config_auditor.py::TestDocker::test_docker_missing_container"
+   ],
+   "flags": [
+    "--docker"
+   ]
+  },
+  {
+   "id": "json-min-severity",
+   "text": "nginx-config-auditor /etc/nginx/ --json --min-severity MEDIUM",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestCli::test_directory_scan_min_severity_and_text"
+   ],
+   "flags": [
+    "--json",
+    "--min-severity"
+   ]
+  },
+  {
+   "id": "exit-codes",
+   "text": "Exit codes (same convention as every Errant Solutions tool)",
+   "tests": [
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_gixy_style_checks",
+    "tests/test_nginx_config_auditor.py::TestChecks::test_hardened_config_is_clean",
+    "tests/test_nginx_config_auditor.py::TestMergedConfig::test_parse_errors_exit_2",
+    "tests/test_nginx_config_auditor.py::TestCli::test_usage_errors"
+   ],
+   "flags": [
+    "--fail-on"
+   ]
+  },
+  {
+   "id": "stdlib-only",
+   "text": "stdlib-only Python 3 static analyzer",
+   "tests": [
+    "tests/test_claims.py::TestClaims::test_stdlib_only"
+   ]
+  },
+  {
+   "id": "offline",
+   "text": "No network calls",
+   "tests": [
+    "tests/test_claims.py::TestClaims::test_offline_claim"
+   ]
+  },
+  {
+   "id": "install-pipx",
+   "text": "pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git",
+   "tests": [
+    "ci/install-channels.sh#pipx install -q \"git+$FORGEJO/CanuteTheGreat/$REPO.git\"",
+    ".forgejo/workflows/nightly.yml#ci/install-channels.sh"
+   ]
+  },
+  {
+   "id": "install-homebrew",
+   "text": "brew install canutethegreat/errant-tools/nginx-config-auditor",
+   "tests": [
+    "repo:homebrew-errant-tools/Formula/nginx-config-auditor.rb#test do",
+    "repo:homebrew-errant-tools/.forgejo/workflows/test.yml#ci/run-tests.sh"
+   ]
+  },
+  {
+   "id": "install-scoop",
+   "text": "scoop install errant-tools/nginx-config-auditor",
+   "tests": [
+    "repo:scoop-errant-tools/bucket/nginx-config-auditor.json#\"bin\"",
+    "repo:scoop-errant-tools/.forgejo/workflows/test.yml#ci/run-tests.sh"
+   ]
+  },
+  {
+   "id": "install-download",
+   "text": "https://errant.solutions/downloads/nginx_config_auditor.py",
+   "tests": [
+    "ci/install-channels.sh#https://errant.solutions/downloads/$FILE"
+   ]
+  },
+  {
+   "id": "release-assets",
+   "text": "`SHA256SUMS` file",
+   "tests": [
+    "ci/install-channels.sh#sha256sum -c SHA256SUMS",
+    "ci/release.py#SHA256SUMS"
+   ]
+  },
+  {
+   "id": "python-versions",
+   "text": "Python 3.8+",
+   "tests": [
+    ".forgejo/workflows/test.yml#python: [\"3.8\"",
+    ".forgejo/workflows/nightly.yml#python: [\"3.8\""
+   ]
+  }
+ ]
+}

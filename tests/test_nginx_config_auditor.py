@@ -374,5 +374,44 @@ class TestMergedConfig(Base):
         self.assertRegex(run("--version").stdout, r"^nginx-config-auditor \d+\.\d+\.\d+$")
 
 
+class TestLimitationsAndSmallRules(Base):
+    """What the README's Limitations section promises, and the rules no other test pins."""
+
+    def test_lua_block_bodies_are_skipped_not_parsed(self):
+        # braces and semicolons inside a *_by_lua_block body are Lua, not nginx syntax
+        path = self.conf("server { listen 8080; location / { content_by_lua_block { "
+                         "local t = {a = 1}; if t.a then ngx.say(\"autoindex on;\") end } } }\n", validate=False)
+        code, f = self.findings(path)
+        self.assertNotIn("autoindex", self.rules(f))
+        self.assertIn("missing_header", self.rules(f))
+
+    def test_relative_include_resolves_against_the_files_directory(self):
+        os.makedirs(os.path.join(self.dir, "snip"))
+        with open(os.path.join(self.dir, "snip", "x.inc"), "w") as f:
+            f.write("autoindex on;\n")
+        path = self.conf("server { listen 8080; location / { include snip/x.inc; } }\n", validate=False)
+        _, f = self.findings(path)
+        self.assertIn("autoindex", self.rules(f))
+        path = self.conf("server { listen 8080; include nope/missing.inc; }\n", "b.conf", validate=False)
+        _, f = self.findings(path)
+        self.assertIn("include_missing", self.rules(f))
+
+    def test_short_hsts_max_age_is_low(self):
+        _, f = self.findings(self.conf('server { listen 8443 ssl; ssl_certificate %(cert)s; ssl_certificate_key %(key)s; '
+                                       'add_header Strict-Transport-Security "max-age=86400" always; }\n'))
+        short = [x for x in f if x["rule"] == "hsts_short"]
+        self.assertEqual([x["severity"] for x in short], ["LOW"])
+
+    def test_anonymous_suites_need_seclevel_0(self):
+        _, f = self.findings(self.conf("server { listen 8443 ssl; ssl_certificate %(cert)s; ssl_certificate_key %(key)s; "
+                                       "ssl_ciphers HIGH; }\n"))
+        self.assertNotIn("ssl_ciphers", self.rules(f))  # OpenSSL >= 1.1 refuses aNULL at its default level
+        _, f = self.findings(self.conf("server { listen 8443 ssl; ssl_certificate %(cert)s; ssl_certificate_key %(key)s; "
+                                       "ssl_ciphers HIGH:@SECLEVEL=0; }\n", "b.conf"))
+        msg = [x["message"] for x in f if x["rule"] == "ssl_ciphers"]
+        self.assertEqual(len(msg), 1, f)
+        self.assertIn("anonymous (ADH/AECDH) suites", msg[0])
+
+
 if __name__ == "__main__":
     unittest.main()

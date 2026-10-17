@@ -42,7 +42,7 @@ SEVERITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "INFO": 3}
 
 WEAK_PROTOCOLS = {"SSLv2", "SSLv3", "TLSv1", "TLSv1.1"}
 WEAK_CIPHER_TOKENS = [
-    "RC4", "DES", "3DES", "MD5", "EXPORT", "NULL", "aNULL", "eNULL", "ADH", "PSK",
+    "RC4", "DES", "3DES", "MD5", "EXPORT", "EXP", "LOW", "NULL", "aNULL", "eNULL", "ADH", "AECDH", "PSK",
 ]
 SECURITY_HEADERS = [
     "Strict-Transport-Security",
@@ -269,20 +269,65 @@ def _f(path, line, sev, rule, msg):
     return {"file": path, "line": line, "severity": sev, "rule": rule, "message": msg}
 
 
+# OpenSSL cipher-string aliases that include ANONYMOUS suites (no server authentication: anyone on
+# the path can intercept) unless a "!aNULL" (or narrower "!ADH"/"!AECDH") removes them. ADH =
+# anonymous DH suites, AECDH = anonymous ECDH suites. OpenSSL >= 1.1.0 refuses anonymous suites at
+# its default security level, so they are only live when the string also says @SECLEVEL=0.
+# Measured with `openssl ciphers` (OpenSSL 3.0); tests/test_accuracy.py checks every entry against
+# a real nginx handshake.
+_BOTH, _ADH, _AECDH = frozenset({"ADH", "AECDH"}), frozenset({"ADH"}), frozenset({"AECDH"})
+ANON_ALIASES = {
+    "ALL": _BOTH, "HIGH": _BOTH, "COMPLEMENTOFDEFAULT": _BOTH, "COMPLEMENTOFALL": _AECDH, "FIPS": _BOTH,
+    "ANULL": _BOTH, "ADH": _ADH, "AECDH": _AECDH, "DH": _ADH, "KDHE": _ADH, "KEDH": _ADH,
+    "ECDH": _AECDH, "KECDHE": _AECDH, "KEECDH": _AECDH, "AES": _BOTH, "AES128": _BOTH, "AES256": _BOTH,
+    "AESGCM": _ADH, "CAMELLIA": _ADH, "CAMELLIA128": _ADH, "CAMELLIA256": _ADH, "SHA": _BOTH, "SHA1": _BOTH,
+    "SHA256": _ADH, "SSLV3": _ADH, "TLSV1": _AECDH, "TLSV1.0": _AECDH, "TLSV1.2": _ADH,
+    "ENULL": _AECDH, "NULL": _AECDH,
+}
+
+
+def _anon_of(token):
+    """Anonymous suite families a positive cipher-string token enables ('A+B' = intersection)."""
+    fams = None
+    for part in token.split("+"):
+        up = part.upper()
+        if up.startswith("ADH-"):
+            f = _ADH
+        elif up.startswith("AECDH-"):
+            f = _AECDH
+        else:
+            f = ANON_ALIASES.get(up, frozenset())
+        fams = f if fams is None else fams & f
+    return fams or frozenset()
+
+
 def weak_cipher_hits(cipherspec):
-    """Weak tokens actually ENABLED by an OpenSSL cipher string. Excluded
+    """Weak ciphers actually ENABLED by an OpenSSL cipher string. Excluded
     entries ("!aNULL", "-MD5") are the fix, not the problem -- the stock
-    `HIGH:!aNULL:!MD5` must not be reported as weak."""
+    `HIGH:!aNULL:!MD5` must not be reported as weak -- but with @SECLEVEL=0,
+    aliases like `HIGH` or `ALL` enable anonymous suites, and that is reported."""
     hits = []
+    anon, banned, seclevel0 = set(), set(), False
     for tok in cipherspec.strip("\"'").replace(",", ":").replace(" ", ":").split(":"):
-        if not tok or tok[0] in "!-" or tok.startswith("@"):
+        if tok.upper().replace(" ", "") == "@SECLEVEL=0":
+            seclevel0 = True
+        if not tok or tok.startswith("@"):
+            continue
+        if tok[0] in "!-":
+            fams = _anon_of(tok[1:])
+            anon -= fams
+            if tok[0] == "!":
+                banned |= fams
             continue
         tok = tok.lstrip("+")
+        anon |= _anon_of(tok) - banned
         parts = set(tok.split("-")) | {tok}
         for weak in WEAK_CIPHER_TOKENS:
             matched = weak in parts or (weak == "3DES" and "CBC3" in tok)
             if matched and weak not in hits:
                 hits.append(weak)
+    if seclevel0 and anon and not any(h in hits for h in ("aNULL", "ADH", "AECDH")):
+        hits.append("anonymous (%s) suites: @SECLEVEL=0 plus an alias without !aNULL" % "/".join(sorted(anon)))
     return hits
 
 

@@ -11,7 +11,7 @@ saved `nginx -T` dump, this host's nginx, or a running Docker container.
 |---|---|
 | `autoindex on` (directory listing) | HIGH |
 | weak TLS protocols (SSLv2/3, TLSv1, TLSv1.1) in `ssl_protocols` | HIGH |
-| weak cipher tokens (RC4, DES, 3DES, MD5, EXPORT, NULL, ADH, PSK) enabled in `ssl_ciphers` | HIGH |
+| weak cipher tokens (RC4, DES, 3DES, MD5, EXPORT, LOW, NULL, ADH/AECDH, PSK) enabled in `ssl_ciphers`, and anonymous suites that aliases like `HIGH`/`ALL` pull in when the string also lowers `@SECLEVEL=0` | HIGH |
 | **alias traversal**: `location /static` (no trailing slash) with `alias /srv/static/` | HIGH |
 | missing security headers per server (HSTS on TLS servers, X-Content-Type-Options, X-Frame-Options, CSP, Referrer-Policy), with http-level headers inherited exactly as nginx inherits them | MEDIUM |
 | **`add_header` redefinition**: a location with its own `add_header` silently drops every inherited header | MEDIUM |

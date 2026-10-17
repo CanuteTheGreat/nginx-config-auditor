@@ -2,6 +2,12 @@
 
 All notable changes. Versions are git tags; each tag has a Forgejo release with checksums.
 
+## Unreleased
+
+- `ssl_ciphers`: anonymous (unauthenticated) suites that aliases such as `HIGH`, `ALL`, `AES` or `kEDH`
+  enable are reported when the string also sets `@SECLEVEL=0` (the only way current OpenSSL negotiates
+  them; checked against real nginx handshakes); `LOW`, `EXP` and `AECDH` tokens are weak too.
+
 ## 1.2.0 - 2026-10-16
 
 - **Includes are followed** (globs too) and the merged tree is audited, so headers or TLS settings set in an
