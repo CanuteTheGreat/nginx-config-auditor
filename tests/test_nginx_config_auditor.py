@@ -323,7 +323,7 @@ class TestMergedConfig(Base):
         self.assertEqual(len(by["origin_regex"]), 1)       # the anchored, escaped one is fine
         self.assertEqual(len(by["multiline_header"]), 1)
         self.assertEqual([x["message"].split(" without")[0] for x in by["header_not_always"]],
-                         ["add_header Strict-Transport-Security"])
+                         ["add_header X-Content-Type-Options"])
         self.assertEqual(self.findings(main)[0], 1)  # alias traversal is HIGH
 
     def test_directory_with_nginx_conf_follows_it(self):
