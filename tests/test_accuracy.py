@@ -21,6 +21,7 @@ import os
 import random
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -34,7 +35,26 @@ SEED = 20261016
 SEC = {"Strict-Transport-Security": "max-age=31536000", "X-Content-Type-Options": "nosniff",
        "X-Frame-Options": "DENY", "Content-Security-Policy": "default-src 'self'", "Referrer-Policy": "no-referrer"}
 NON_TLS_REQUIRED = [h for h in SEC if h != "Strict-Transport-Security"]
-HTTP_BASE, TLS_BASE = 18100, 18500
+# Listen ports are picked free at setUpModule time, never fixed: mutation testing runs this module in
+# several processes at once (mutmut --max-children), and with fixed ports (18100+/18500+) the second
+# nginx failed to bind while its tests silently talked to the FIRST process's nginx and corpus - which
+# could be torn down mid-test. Mutants were then killed or kept at random (about 100 flipped between
+# two full runs of the same code, 2026-10-20) instead of by what the tool does.
+HTTP_PORTS, TLS_PORTS = [], []
+
+
+def free_ports(n):
+    """n distinct TCP ports on 127.0.0.1 that are free right now (all held open until all are chosen)."""
+    socks = []
+    try:
+        for _ in range(n):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(("127.0.0.1", 0))
+            socks.append(s)
+        return [s.getsockname()[1] for s in socks]
+    finally:
+        for s in socks:
+            s.close()
 
 CIPHERS = [
     "HIGH:!aNULL:!MD5", "HIGH", "ALL", "ALL:!aNULL", "ALL:!ADH", "ALL:!AECDH", "ALL:!ADH:!AECDH", "DEFAULT",
@@ -89,7 +109,7 @@ def header_corpus():
         http_lines = ["    include %(tmp)s/http-headers.inc;"]
     body = []
     for i in range(30):
-        port = HTTP_BASE + i
+        port = HTTP_PORTS[i]
         srv = ["    server {", "        listen 127.0.0.1:%d;" % port, "        server_name s%d.test;" % i,
                "        root %(tmp)s/www;"]
         own = add_headers(rnd, "        ") if rnd.random() < 0.7 else []
@@ -118,7 +138,7 @@ def header_corpus():
 def tls_conf(cert, key, dh):
     out = []
     for j, c in enumerate(CIPHERS):
-        out += ["    server {", "        listen 127.0.0.1:%d ssl;" % (TLS_BASE + j), "        server_name c%d.test;" % j,
+        out += ["    server {", "        listen 127.0.0.1:%d ssl;" % TLS_PORTS[j], "        server_name c%d.test;" % j,
                 "        ssl_certificate %s; ssl_certificate_key %s; ssl_dhparam %s;" % (cert, key, dh),
                 "        ssl_protocols TLSv1.2;", '        ssl_ciphers "%s";' % c, '        return 200 "ok";', "    }"]
     return out
@@ -130,12 +150,25 @@ def setUpModule():
     os.chmod(TMP, 0o755)
     os.makedirs(os.path.join(TMP, "www"))
     with open(os.path.join(TMP, "www", "index.html"), "w") as f:
-        f.write("index\n")
+        # unique per process: the startup probe below must reach THIS module's nginx
+        f.write("index %s\n" % TMP)
     os.chmod(os.path.join(TMP, "www"), 0o755)
     CERT, KEY, DH = (os.path.join(TMP, n) for n in ("c.pem", "k.pem", "dh.pem"))
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", KEY, "-out", CERT,
                     "-subj", "/CN=c.test", "-days", "2"], check=True, capture_output=True)
     subprocess.run(["openssl", "dhparam", "-dsaparam", "-out", DH, "2048"], check=True, capture_output=True)
+    # a free port can still be taken by a parallel run between free_ports() and nginx's bind():
+    # then nginx exits with "Address already in use" and we try again on fresh ports
+    for _ in range(10):
+        if start_nginx():
+            return
+    raise RuntimeError("nginx could not bind its ports in 10 attempts")
+
+
+def start_nginx():
+    global MAIN, SERVERS, NGX
+    ports = free_ports(30 + len(CIPHERS))
+    HTTP_PORTS[:], TLS_PORTS[:] = ports[:30], ports[30:]
     main, files, SERVERS = header_corpus()
     main = main.rstrip().rstrip("}") + "\n".join(tls_conf(CERT, KEY, DH)) + "\n}\n"
     for name, text in files.items():
@@ -147,13 +180,27 @@ def setUpModule():
     p = subprocess.run([NGINX, "-t", "-c", MAIN], capture_output=True, text=True)
     if p.returncode != 0:
         raise RuntimeError("corpus rejected by nginx -t: " + p.stderr)
-    NGX = subprocess.Popen([NGINX, "-c", MAIN, "-g", "daemon off;"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    errlog = os.path.join(TMP, "nginx-stderr.log")
+    with open(errlog, "w") as err:
+        NGX = subprocess.Popen([NGINX, "-c", MAIN, "-g", "daemon off;"], stdout=subprocess.DEVNULL, stderr=err)
     for _ in range(100):
+        if NGX.poll() is not None:
+            with open(errlog) as f:
+                err = f.read()
+            if "Address already in use" in err:
+                return False
+            raise RuntimeError("nginx exited with %s: %s" % (NGX.returncode, err[-500:]))
         try:
-            fetch(SERVERS[0], "/index.html")
-            return
+            c = http.client.HTTPConnection("127.0.0.1", SERVERS[0]["port"], timeout=10)
+            c.request("GET", "/index.html", headers={"Host": SERVERS[0]["name"]})
+            body = c.getresponse().read().decode()
+            c.close()
         except OSError:
             time.sleep(0.1)
+            continue
+        if body != "index %s\n" % TMP:
+            raise RuntimeError("port %d answered with another server's page: %r" % (SERVERS[0]["port"], body[:80]))
+        return True
     raise RuntimeError("nginx did not start")
 
 
@@ -250,7 +297,7 @@ def negotiates_anonymous(port):
 
 class TestAnonymousCiphersAgainstHandshake(unittest.TestCase):
     def test_tool_reports_exactly_the_configs_that_negotiate_anonymous_suites(self):
-        live = {c for j, c in enumerate(CIPHERS) if negotiates_anonymous(TLS_BASE + j)}
+        live = {c for j, c in enumerate(CIPHERS) if negotiates_anonymous(TLS_PORTS[j])}
         self.assertGreater(len(live), 8)
         self.assertGreater(len(CIPHERS) - len(live), 30)
         # a string that explicitly ENABLES anonymous suites by name is reported even where today's
