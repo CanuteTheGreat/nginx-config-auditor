@@ -138,5 +138,18 @@ EOF
 if [ $rc = 0 ]; then
   mkdir -p .mutation-baseline
   docker cp "$NAME:/src/.mutation-baseline/$MUT_ID" .mutation-baseline/ 2>/dev/null || true
+  # Publish it to the shared store branch from the HOST: the gate ran inside the container, where
+  # GITHUB_ACTIONS / GITHUB_REF_NAME are unset, so its own store_push silently did nothing and the
+  # baseline stayed at 2026-10-22 (survivors: []) - every later incremental run then called all of the
+  # repo's known survivors NEW (nginx-config-auditor run 54: 128 "new" survivors after a green 93.91 %
+  # full run) whenever the Actions cache had expired.
+  if [ -f ".mutation-baseline/$MUT_ID/baseline.json" ]; then
+    MUT_ID="$MUT_ID" python3 -c '
+import importlib.util, os
+spec = importlib.util.spec_from_file_location("mi", "ci/mutation-incremental.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.store_push(os.environ["MUT_ID"])
+' || true
+  fi
 fi
 exit $rc
