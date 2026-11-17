@@ -1,6 +1,6 @@
 {
  "id": "nginx-config-auditor",
- "last_full": "2026-11-10",
+ "last_full": "2026-11-17",
  "sha": "78f0d618940a98c14f5d68dbb3e4531ceeeab9de",
  "survivors": [
   "nginx_config_auditor.x__contexts__mutmut_1",
@@ -61,6 +61,7 @@
   "nginx_config_auditor.x_check_directives__mutmut_525",
   "nginx_config_auditor.x_check_directives__mutmut_542",
   "nginx_config_auditor.x_check_headers__mutmut_15",
+  "nginx_config_auditor.x_check_headers__mutmut_16",
   "nginx_config_auditor.x_check_headers__mutmut_24",
   "nginx_config_auditor.x_check_headers__mutmut_74",
   "nginx_config_auditor.x_docker_dump__mutmut_11",
