@@ -1,7 +1,7 @@
 {
  "id": "nginx-config-auditor",
  "last_full": "2026-11-17",
- "sha": "78f0d618940a98c14f5d68dbb3e4531ceeeab9de",
+ "sha": "c8efc2d41f14baf46deb395044abdc4c36a08569",
  "survivors": [
   "nginx_config_auditor.x__contexts__mutmut_1",
   "nginx_config_auditor.x__contexts__mutmut_33",
