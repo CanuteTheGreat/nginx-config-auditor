@@ -17,8 +17,13 @@ REPO="$(basename "$(pwd)")"
 NAME="ci-${REPO}-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-py${PY}-$$"
 cleanup() { docker rm -f -v "$NAME" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
+# /tmp is a size-capped tmpfs (CI_TMP_SIZE, default 384m): the suite's temp files (certs, dhparams, fixtures,
+# the pip venv) never touch the runner host's disk, so a full host cannot fail the tests with ENOSPC
+# (nightly run 77, python-matrix 3.12: 14 x "[Errno 28] No space left on device: /tmp/tmp...").
+# It is freed with the container; its pages count against --memory.
 # shellcheck disable=SC2086
 docker run -d --name "$NAME" --memory 1g --cpus 2 --pids-limit 512 \
+  --tmpfs "/tmp:rw,exec,mode=1777,size=${CI_TMP_SIZE:-384m}" -e PIP_NO_CACHE_DIR=1 \
   ${EXTRA_DOCKER_ARGS:-} "$IMAGE" sleep 1800 >/dev/null
 docker cp . "$NAME:/src"
 docker exec -w /src "$NAME" sh -ec '
