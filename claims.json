@@ -256,6 +256,40 @@
     ".forgejo/workflows/test.yml#python: [\"3.8\"",
     ".forgejo/workflows/nightly.yml#python: [\"3.8\""
    ]
+  },
+  {
+   "id": "cli-contract-exit-codes",
+   "text": "| 3 | unexpected internal error (message on stderr, never a traceback) |",
+   "tests": [
+    "tests/test_cli_contract.py::TestExitCodes::test_unexpected_error_exits_3_not_a_traceback",
+    "tests/test_cli_contract.py::TestExitCodes::test_missing_nginx_binary_is_legacy_exit_2",
+    "tests/test_cli_contract.py::TestExitCodes::test_missing_docker_binary_is_legacy_exit_2",
+    "tests/test_cli_contract.py::TestExitCodes::test_unparseable_config_exits_2",
+    "tests/test_cli_contract.py::TestExitCodes::test_findings_exit_1",
+    "tests/test_cli_contract.py::TestExitCodes::test_clean_input_exits_0"
+   ]
+  },
+  {
+   "id": "cli-contract-json",
+   "text": "`--json` prints exactly one JSON object",
+   "tests": [
+    "tests/test_cli_contract.py::TestJson::test_clean_validates_against_schema",
+    "tests/test_cli_contract.py::TestJson::test_findings_validate_against_schema",
+    "tests/test_cli_contract.py::TestJson::test_errors_leave_stdout_empty"
+   ],
+   "flags": []
+  },
+  {
+   "id": "cli-contract-quiet",
+   "text": "`--quiet` (`-q`) prints nothing on stdout",
+   "tests": [
+    "tests/test_cli_contract.py::TestQuiet::test_quiet_clean",
+    "tests/test_cli_contract.py::TestQuiet::test_quiet_findings_keep_exit_code",
+    "tests/test_cli_contract.py::TestQuiet::test_quiet_suppresses_json_too"
+   ],
+   "flags": [
+    "--quiet"
+   ]
   }
  ]
 }

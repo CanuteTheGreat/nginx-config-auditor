@@ -22,10 +22,15 @@ Host taken from $http_host, $uri/$document_uri in response headers (header
 splitting), multi-line header values and unanchored Origin/Referer regexes.
 
 No dependencies beyond the Python 3 standard library. Read-only: never
-modifies any file it scans. Exit codes: 0 = no finding at or above
---fail-on (default: high), 1 = at least one, 2 = nothing to scan / usage error.
+modifies any file it scans.
+
+Exit codes (shared CLI contract, docs/CLI-CONTRACT.md): 0 = no finding at or above --fail-on
+(default: high), 1 = at least one, 2 = usage error, nothing to scan, parse error, or
+`nginx -T`/docker failed (legacy: these were always 2), 3 = unexpected internal error.
+--json prints one object (schema_version, tool, version, exit_code, results); --quiet/-q
+prints nothing on stdout.
 """
-__version__ = "1.2.1"
+__version__ = "2.0.0"
 
 import argparse
 import fnmatch
@@ -584,6 +589,14 @@ def docker_extract(container):
 
 
 def main(argv=None):
+    try:
+        return _main(argv)
+    except Exception as e:  # never let a traceback look like exit code 1 (findings)
+        print(f"nginx-config-auditor: unexpected error -- {type(e).__name__}: {e}", file=sys.stderr)
+        return 3
+
+
+def _main(argv=None):
     ap = argparse.ArgumentParser(prog="nginx-config-auditor", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
@@ -593,10 +606,13 @@ def main(argv=None):
     ap.add_argument("--local", action="store_true", help="run `nginx -T` on this host and audit the merged config")
     ap.add_argument("--dump", metavar="FILE", help="audit saved `nginx -T` output ('-' for stdin)")
     ap.add_argument("--json", action="store_true", help="output findings as JSON instead of text")
+    ap.add_argument("-q", "--quiet", action="store_true", help="print nothing on stdout (exit code only)")
     ap.add_argument("--min-severity", default="INFO", choices=list(SEVERITY_ORDER),
                     help="only show findings at or above this severity")
     ap.add_argument("--fail-on", choices=["high", "medium", "low", "never"], default="high",
                     help="lowest severity that makes the exit code 1 (default: high)")
+    ap.epilog = ("exit codes: 0 clean, 1 findings at or above --fail-on, 2 usage/input/parse/nginx or docker "
+                 "failure (legacy), 3 unexpected error")
     args = ap.parse_args(argv)
 
     if sum(bool(x) for x in (args.path, args.docker, args.local, args.dump)) != 1:
@@ -653,18 +669,23 @@ def report(args, files, all_findings):
     shown = [f for f in all_findings if SEVERITY_ORDER[f["severity"]] <= min_sev]
     shown.sort(key=lambda f: (SEVERITY_ORDER[f["severity"]], f["file"], f["line"] or 0))
 
-    if args.json:
-        print(json.dumps(shown, indent=2))
+    if args.fail_on == "never":
+        code = 0
+    else:
+        gate = SEVERITY_ORDER[args.fail_on.upper()]
+        code = 1 if any(SEVERITY_ORDER[f["severity"]] <= gate for f in all_findings) else 0
+
+    if args.quiet:
+        pass
+    elif args.json:
+        print(json.dumps({"schema_version": 1, "tool": "nginx-config-auditor", "version": __version__,
+                          "exit_code": code, "results": shown}, indent=2))
     else:
         print(f"nginx-config-auditor: scanned {len(files)} file(s), {len(shown)} finding(s)\n")
         for f in shown:
             loc = f"{f['file']}:{f['line']}" if f["line"] else f["file"]
             print(f"[{f['severity']:6}] {f['rule']:24} {loc}\n         {f['message']}\n")
-
-    if args.fail_on == "never":
-        return 0
-    gate = SEVERITY_ORDER[args.fail_on.upper()]
-    return 1 if any(SEVERITY_ORDER[f["severity"]] <= gate for f in all_findings) else 0
+    return code
 
 
 if __name__ == "__main__":

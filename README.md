@@ -28,7 +28,7 @@ same classes of problems [gixy](https://github.com/yandex/gixy) looks for.
 
 ```sh
 pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git        # latest release branch; puts `nginx-config-auditor` on PATH
-pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git@v1.2.1  # a pinned release
+pipx install git+https://git.canutethegreat.com/CanuteTheGreat/nginx-config-auditor.git@v2.0.0  # a pinned release
 brew install canutethegreat/errant-tools/nginx-config-auditor   # after: brew tap canutethegreat/errant-tools https://git.canutethegreat.com/CanuteTheGreat/homebrew-errant-tools
 scoop install errant-tools/nginx-config-auditor                 # after: scoop bucket add errant-tools https://git.canutethegreat.com/CanuteTheGreat/scoop-errant-tools
 ```
@@ -51,13 +51,23 @@ nginx-config-auditor /etc/nginx/ --json --min-severity MEDIUM
 nginx-config-auditor /etc/nginx/ --fail-on medium   # CI gate
 ```
 
-Exit codes (same convention as every Errant Solutions tool):
+## Exit codes and JSON output
+
+Exit codes (same convention as every Errant Solutions tool), per the shared contract in
+[docs/CLI-CONTRACT.md](docs/CLI-CONTRACT.md):
 
 | Code | Meaning |
 |---|---|
 | 0 | no finding at or above `--fail-on` (default `high`) |
 | 1 | at least one |
-| 2 | nothing to scan, a parse error, `nginx -T`/docker failed, or bad usage |
+| 2 | usage error, nothing to scan, a parse error, or `nginx -T`/docker failed (legacy: these were always 2 here, so they stay 2 instead of the contract's 3) |
+| 3 | unexpected internal error (message on stderr, never a traceback) |
+
+`--json` prints exactly one JSON object: `schema_version` (1), `tool`, `version`, `exit_code` and
+`results` (the list of findings). Since 2.0.0 the findings are under `results`; before that the
+output was the bare list. The JSON Schema is [schema/nginx-config-auditor.schema.json](schema/nginx-config-auditor.schema.json).
+`--quiet` (`-q`) prints nothing on stdout, so only the exit code (and errors on stderr) remain.
+Errors always go to stderr.
 
 ## Limitations
 

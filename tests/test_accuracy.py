@@ -231,7 +231,7 @@ class TestHeaderInheritanceAgainstNginx(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         p = run("--json", MAIN)
-        cls.findings = json.loads(p.stdout)
+        cls.findings = json.loads(p.stdout)["results"]
         cls.ref = {}
         for s in SERVERS:
             st200, h200 = fetch(s, "/index.html")
@@ -285,7 +285,7 @@ class TestHeaderInheritanceAgainstNginx(unittest.TestCase):
         dump = subprocess.run([NGINX, "-T", "-c", MAIN], capture_output=True, text=True, check=True).stdout
         p = run("--json", "--dump", "-", input=dump)
         key = lambda f: (f["rule"], f["message"])
-        self.assertEqual(sorted(map(key, json.loads(p.stdout))), sorted(map(key, self.findings)))
+        self.assertEqual(sorted(map(key, json.loads(p.stdout)["results"])), sorted(map(key, self.findings)))
 
 
 def negotiates_anonymous(port):
@@ -306,7 +306,7 @@ class TestAnonymousCiphersAgainstHandshake(unittest.TestCase):
                                              for t in c.split(":"))}
         ref = live | explicit
         flagged = set()
-        for f in json.loads(run("--json", MAIN).stdout):
+        for f in json.loads(run("--json", MAIN).stdout)["results"]:
             if f["rule"] == "ssl_ciphers" and re.search(r"anonymous|aNULL|ADH|AECDH", f["message"]):
                 with open(f["file"]) as fh:
                     flagged.add(re.search(r'ssl_ciphers "(.*)";', fh.read().splitlines()[f["line"] - 1]).group(1))
@@ -328,7 +328,7 @@ class TestMozillaGenerator(unittest.TestCase):
             f.write("pid %s/n.pid; error_log stderr; events {} http { include %s; }\n" % (d, conf))
         p = subprocess.run([NGINX, "-t", "-c", main], capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
-        return [(f["rule"], f["message"]) for f in json.loads(run("--json", conf).stdout) if f["severity"] == "HIGH"]
+        return [(f["rule"], f["message"]) for f in json.loads(run("--json", conf).stdout)["results"] if f["severity"] == "HIGH"]
 
     def test_modern_and_intermediate_have_no_high_tls_finding(self):
         self.assertEqual(self.audit("modern"), [])

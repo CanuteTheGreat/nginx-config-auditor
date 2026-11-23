@@ -2,6 +2,22 @@
 
 All notable changes. Versions are git tags; each tag has a Forgejo release with checksums.
 
+## 2.0.0 - 2026-11-23
+
+Shared CLI contract (docs/CLI-CONTRACT.md).
+
+### Changed (breaking)
+
+- `--json` now prints one object `{"schema_version": 1, "tool", "version", "exit_code", "results": [...]}`
+  instead of a bare list of findings; the old list is the `results` value, unchanged.
+
+### Added
+
+- `--quiet` / `-q`: no stdout, exit code and stderr errors only.
+- Unexpected internal errors exit 3 with a message on stderr instead of a traceback (which would
+  have exited 1, like findings). Usage, input, parse and `nginx -T`/docker failures keep exit 2 (legacy).
+- JSON Schema `schema/nginx-config-auditor.schema.json` and contract tests (`tests/test_cli_contract.py`).
+
 ## 1.2.1 - 2026-10-17
 
 - `ssl_ciphers`: anonymous (unauthenticated) suites that aliases such as `HIGH`, `ALL`, `AES` or `kEDH`

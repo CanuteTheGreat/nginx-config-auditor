@@ -100,7 +100,7 @@ class Base(unittest.TestCase):
     def findings(self, *args):
         p = run("--json", *args)
         self.assertIn(p.returncode, (0, 1), p.stderr)
-        return p.returncode, json.loads(p.stdout)
+        return p.returncode, json.loads(p.stdout)["results"]
 
     @staticmethod
     def rules(findings):
@@ -209,7 +209,7 @@ class TestDocker(Base):
         before = set(glob.glob(os.path.join(tempfile.gettempdir(), "nginx-audit-*")))
         p = run("--docker", self.name, "--json")
         self.assertEqual(p.returncode, 1, p.stderr)
-        f = json.loads(p.stdout)
+        f = json.loads(p.stdout)["results"]
         auto = [x for x in f if x["rule"] == "autoindex"]
         self.assertEqual(auto[0]["file"], f"{self.name}:/etc/nginx/conf.d/weak.conf")
         # read through `nginx -T` inside the container: the merged config, includes and all
@@ -271,7 +271,7 @@ class TestMergedConfig(Base):
         self.assertEqual(f, [], f)
         # the old one-file-at-a-time scan reported every header missing here
         p = run("--json", os.path.join(self.dir, "snippets", "headers.inc"))
-        self.assertEqual([x["rule"] for x in json.loads(p.stdout) if x["rule"] == "missing_header"], [])
+        self.assertEqual([x["rule"] for x in json.loads(p.stdout)["results"] if x["rule"] == "missing_header"], [])
 
     def test_http_level_headers_are_inherited_and_glob_includes(self):
         main = self.main("    include %(dir)s/conf.d/*.conf;\n" + self.HEADERS.replace("\n", "\n    "),
@@ -279,7 +279,7 @@ class TestMergedConfig(Base):
                           ("conf.d/b.conf", self.server("location / { return 204; }").replace("m.test", "n.test")
                            .replace("8443", "8444"))])
         p = run("--json", main)
-        f = json.loads(p.stdout)
+        f = json.loads(p.stdout)["results"]
         self.assertEqual([x for x in f if x["rule"] == "missing_header"], [])
         self.assertEqual(p.returncode, 0)
         p = run(main)
@@ -346,7 +346,7 @@ class TestMergedConfig(Base):
         b = self.findings("--dump", path)[1]
         p = subprocess.run([sys.executable, TOOL, "--json", "--dump", "-"], input=dump, capture_output=True, text=True)
         self.assertEqual(sorted(map(json.dumps, a)), sorted(map(json.dumps, b)))
-        self.assertEqual(sorted(map(json.dumps, a)), sorted(map(json.dumps, json.loads(p.stdout))))
+        self.assertEqual(sorted(map(json.dumps, a)), sorted(map(json.dumps, json.loads(p.stdout)["results"])))
         self.assertEqual(run("--dump", self.cfg_bad()).returncode, 2)
 
     def cfg_bad(self):

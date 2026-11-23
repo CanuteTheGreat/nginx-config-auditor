@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "nginx-config-auditor --json output (schema_version 1)",
+  "type": "object",
+  "required": ["schema_version", "tool", "version", "exit_code", "results"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "tool": {"type": "string", "const": "nginx-config-auditor"},
+    "version": {"type": "string"},
+    "exit_code": {"type": "integer", "enum": [0, 1]},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "line", "severity", "rule", "message"],
+        "properties": {
+          "file": {"type": "string"},
+          "line": {"type": ["integer", "null"]},
+          "severity": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "INFO"]},
+          "rule": {"type": "string"},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  }
+}
